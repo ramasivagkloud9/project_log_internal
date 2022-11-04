@@ -1,14 +1,21 @@
-import pyspark
+import sys
+from pathlib import Path
+sys.path.append(str(Path.cwd().parent))
+sys.path.append(str(Path.cwd().parent.parent))
+import os
+
 import findspark
+findspark.init()
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import *
 from pyspark.sql.types import *
 import pyspark.sql.functions as F
+from helpers.snowflake_helper import SnowflakeHelper
 
 import env
 
 
-def create_raw_layer():
+def create_raw_layer(processed_path, raw_path, hive_db, hive_table):
     """
     The create_raw_layer function reads the raw data from a Kafka topic and writes it to a Hive table.
     The function also creates an external table in HDFS that contains the raw data as CSV files.
@@ -16,10 +23,10 @@ def create_raw_layer():
 
     :return: A dataframe with the following columns:
     """
-    spark = SparkSession.builder.appName("Demo-Project2").config("spark.master",
-                                                                 "local").enableHiveSupport().getOrCreate()
-    df = spark.read.option("delimiter", " ").csv("{}".format(env.kafka_file_path))
-    df_col = (df.select(
+    spark = SparkSession.builder.enableHiveSupport().config('spark.jars.packages',
+                                                     'net.snowflake:snowflake-jdbc:3.13.23,net.snowflake:spark-snowflake_2.12:2.11.0-spark_3.3').getOrCreate()
+    df = spark.read.option("delimiter", " ").csv(processed_path)
+    df = (df.select(
         F.monotonically_increasing_id().alias('row_id'),
         F.col("_c0").alias("client_ip"),
         F.split(F.col("_c3"), " ").getItem(0).alias("datetime"),
@@ -30,10 +37,16 @@ def create_raw_layer():
         F.col("_c8").alias("referrer"),
         F.col("_c9").alias("user_agent")
     ))
-    df_col.write.mode("overwrite").format('csv').option("header", True).save(
-        "{}".format(env.raw_df_path))
-    df_col.write.mode("overwrite").saveAsTable("{}".format(env.raw_hive_table))
+    # df.show()
+    df.write.mode("overwrite").format('csv').option("header", True).save(raw_path)
+    spark.sql("create database IF NOT EXISTS {}".format(hive_db))
+    df.write.mode("overwrite").saveAsTable("{}.{}".format(hive_db, hive_table))
+    return df
 
 
 if __name__ == "__main__":
-    create_raw_layer()
+    df = create_raw_layer(r"{}/{}".format(os.getcwd(), env.processed_input_path),
+                     r"{}/{}".format(os.getcwd(), env.raw_layer_df_path),
+                     env.hive_db,
+                     env.hive_raw_table)
+    SnowflakeHelper().save_df_to_snowflake(df, env.sf_raw_table)
