@@ -1,4 +1,3 @@
-
 import sys
 from pathlib import Path
 sys.path.append(str(Path.cwd().parent))
@@ -10,6 +9,7 @@ import env
 from helpers.s3_helper import S3Helper
 import os
 import logging
+import random
 
 logging.basicConfig(filename='log.log', filemode='w',
                     format='%(asctime)s.%(msecs)03d : %(name)s - %(levelname)s - %(message)s',
@@ -69,8 +69,22 @@ def increase_ip(ip_val):
     :param ip_val: Pass the ip address to be incremented
     :return: The next ip address in the subnet
     """
-    ip_len = ip_val.split(".")
-    return ".".join([str(int(val) + 1) if (index == len(ip_len) - 1) else val for index, val in enumerate(ip_len)])
+    ip_list = ip_val.split(".")
+    ip_max_val = 255
+    if int(ip_list[-1])+1 <= ip_max_val:
+        ip_list[-1] = str(int(ip_list[-1])+1)
+    else:
+        if int(ip_list[-2])+1 <= ip_max_val:
+            ip_list[-2] = str(int(ip_list[-2])+1)
+        else:
+            if int(ip_list[-3])+1 <= ip_max_val:
+                ip_list[-3] = str(int(ip_list[-3])+1)
+            else:
+                if int(ip_list[-4])+1 <= ip_max_val:
+                    ip_list[-4] = str(int(ip_list[-4])+1)
+                else:
+                    ip_list = [str(10), str(0), str(0), str(0)]
+    return ".".join(ip_list)
 
 
 def clean_request(request_val):
@@ -122,7 +136,7 @@ def remove_space(save_to_path):
         changed_line = '"'.join(temp_line)
         all_lines.append(changed_line)
     save_original_file = open(save_to_path, 'w')
-    save_original_file.writelines(all_lines[:env.processed_input_count])
+    save_original_file.writelines(all_lines)
 
 
 def populate_file(loop_iterations_to_df, rows_to_pick, rows_to_avoid, data_df, save_to_path):
@@ -147,19 +161,20 @@ def populate_file(loop_iterations_to_df, rows_to_pick, rows_to_avoid, data_df, s
     _ = os.remove(save_to_path) if os.path.exists(save_to_path) else True
     _ = True if os.path.isdir(r"/".join(save_to_path.split(r"/")[:-1])) else os.mkdir(
         r"/".join(save_to_path.split(r"/")[:-1]))
-    for file_index in range(0, loop_iterations_to_df):
-        if file_index > 0:
-            shuffled_df = modified_df.sample(frac=1)
-            replaced_df = replace_rows(shuffled_df.iloc[rows_to_pick])
-            unchanged_shuffled_df = shuffled_df.iloc[rows_to_avoid]
-            modified_df = pd.concat([unchanged_shuffled_df, replaced_df], axis=0).sample(frac=1)
-            modified_df.to_csv(save_to_path, header=None, index=None, sep=' ', mode="a")
-            df_row_count += modified_df.shape[0]
-            logging.debug("{} iterations completed and {} rows populated".format(file_index, df_row_count))
-        else:
-            modified_df.to_csv(save_to_path, header=None, index=None, sep=' ', mode="a")
-            df_row_count += modified_df.shape[0]
-            logging.debug("{} iterations completed and {} rows populated".format(file_index, df_row_count))
+    loop_count=0
+    while df_row_count<=env.processed_input_count:
+        # if loop_count > 0:
+        shuffled_df = modified_df.sample(frac=1)
+        rows_to_pick = list(filter(lambda val: val % 10 == 0, [*range(1, shuffled_df.shape[0])]))
+        replaced_df = replace_rows(shuffled_df.iloc[rows_to_pick])
+        modified_df = modified_df.append(replaced_df).sample(frac=1).drop_duplicates()
+        df_row_count = modified_df.shape[0]
+        loop_count += 1
+        logging.debug("{} iterations completed and {} rows populated".format(loop_count, df_row_count))
+        duplicate_rows_count = (modified_df[:env.processed_input_count].shape[0]*env.duplicate_percentage)//100
+    fin_clean_df = modified_df[:(env.processed_input_count-duplicate_rows_count)]
+    modified_df = fin_clean_df.append(fin_clean_df.sample(n=duplicate_rows_count)).sample(frac=1)
+    modified_df.to_csv(save_to_path, header=None, index=None, sep=' ')
     remove_space(save_to_path)
 
 if __name__ == "__main__":
