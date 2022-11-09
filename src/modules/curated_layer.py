@@ -37,11 +37,11 @@ def create_curated_layer():
     """
     spark = SparkSession.builder.enableHiveSupport().config('spark.jars.packages',
                                                             'net.snowflake:snowflake-jdbc:3.13.23,net.snowflake:spark-snowflake_2.12:2.11.0-spark_3.3').getOrCreate()
-    df = spark.read.option("delimiter", ",").option("header", True).csv("{}/{}".format(os.getcwd(), env.cleansed_layer_df_path))
+    df = spark.read.option("delimiter", ",").option("header", True).csv("{}/{}".format(os.getcwd(), env.cleansed_layer_df_path)).coalesce(1)
     print(df.columns)
     df = df.withColumn("status_code", col("status_code").cast("int")).withColumn("row_id", col("row_id").cast("int"))
-    df.write.mode("overwrite").format('csv').option("header", True).save("{}/{}".format(os.getcwd(), env.curated_layer_df_path))
-    df.write.mode("overwrite").saveAsTable("log.curated_log_details")
+    df.coalesce(1).write.mode("overwrite").format('csv').option("header", True).save("{}/{}".format(os.getcwd(), env.curated_layer_df_path))
+    df.coalesce(1).write.mode("overwrite").saveAsTable("log.curated_log_details")
     SnowflakeHelper().save_df_to_snowflake(df, env.sf_curated_table)
     split_date_udf = udf(lambda x: split_date(x), StringType())
     cnt_cond = lambda cond: sum(when(cond, 1).otherwise(0))
@@ -52,8 +52,8 @@ def create_curated_layer():
              cnt_cond(col('method') == "HEAD").alias("no_head"),
              ).orderBy(asc("day_hour")).withColumn("row_id", monotonically_increasing_id()) \
         .select("row_id", "day_hour", "client_ip", "no_get", "no_post", "no_head")
-    log_agg_per_device.write.mode("overwrite").format('csv').option("header", True).save("{}/{}".format(os.getcwd(), env.log_agg_per_device_df_path))
-    log_agg_per_device.write.mode("overwrite").saveAsTable("log.{}".format(env.hive_log_agg_per_device_table))
+    log_agg_per_device.coalesce(1).write.mode("overwrite").format('csv').option("header", True).save("{}/{}".format(os.getcwd(), env.log_agg_per_device_df_path))
+    log_agg_per_device.coalesce(1).write.mode("overwrite").saveAsTable("log.{}".format(env.hive_log_agg_per_device_table))
     SnowflakeHelper().save_df_to_snowflake(log_agg_per_device, env.sf_log_agg_per_device_table)
     log_agg_across_device = log_agg_per_device.groupBy("day_hour") \
         .agg(count(col("client_ip")).alias("no_of_clients"),
@@ -62,8 +62,8 @@ def create_curated_layer():
              sum(col('no_head')).alias("no_head"),
              ).orderBy(asc("day_hour")).withColumn("row_id", monotonically_increasing_id()) \
         .select("row_id", "day_hour", "no_of_clients", "no_get", "no_post", "no_head")
-    log_agg_across_device.write.mode("overwrite").format('csv').option("header", True).save("{}/{}".format(os.getcwd(), env.log_agg_across_device_df_path))
-    log_agg_across_device.write.mode("overwrite").saveAsTable("log.{}".format(env.hive_log_agg_across_device_table))
+    log_agg_across_device.coalesce(1).write.mode("overwrite").format('csv').option("header", True).save("{}/{}".format(os.getcwd(), env.log_agg_across_device_df_path))
+    log_agg_across_device.coalesce(1).write.mode("overwrite").saveAsTable("log.{}".format(env.hive_log_agg_across_device_table))
     SnowflakeHelper().save_df_to_snowflake(log_agg_across_device, env.sf_log_agg_across_device_table)
 
 if __name__ == "__main__":

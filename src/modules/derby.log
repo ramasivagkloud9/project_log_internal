@@ -1,6 +1,6 @@
 ----------------------------------------------------------------
-Fri Nov 04 18:50:36 IST 2022:
-Booting Derby version The Apache Software Foundation - Apache Derby - 10.14.2.0 - (1828579): instance a816c00e-0184-42cc-ea06-00000ba735c0 
+Wed Nov 09 12:30:29 IST 2022:
+Booting Derby version The Apache Software Foundation - Apache Derby - 10.14.2.0 - (1828579): instance a816c00e-0184-5b30-b596-000008a461d0 
 on database directory D:\project_log_internal\src\modules\metastore_db with class loader jdk.internal.loader.ClassLoaders$AppClassLoader@46fbb2c1 
 Loaded from file:/C:/Bigdata/spark-3.3.0-bin-hadoop3/spark-3.3.0-bin-hadoop3/jars/derby-10.14.2.0.jar
 java.vendor=Oracle Corporation

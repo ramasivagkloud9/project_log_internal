@@ -25,7 +25,7 @@ def create_raw_layer(processed_path, raw_path, hive_db, hive_table):
     """
     spark = SparkSession.builder.enableHiveSupport().config('spark.jars.packages',
                                                      'net.snowflake:snowflake-jdbc:3.13.23,net.snowflake:spark-snowflake_2.12:2.11.0-spark_3.3').getOrCreate()
-    df = spark.read.option("delimiter", " ").csv(processed_path)
+    df = spark.read.option("delimiter", " ").csv(processed_path).coalesce(1)
     df = (df.select(
         F.monotonically_increasing_id().alias('row_id'),
         F.col("_c0").alias("client_ip"),
@@ -38,9 +38,19 @@ def create_raw_layer(processed_path, raw_path, hive_db, hive_table):
         F.col("_c9").alias("user_agent")
     ))
     # df.show()
-    df.write.mode("overwrite").format('csv').option("header", True).save(raw_path)
+    def convert_to_na(val):
+        if val=="-":
+            return "NA"
+        else:
+            return str(val)
+    convert_to_na_udf = F.udf(lambda x: convert_to_na(x), StringType())
+    df = df.withColumn("referrer", convert_to_na_udf(col("referrer")))
+    df = df.withColumn('datetime', regexp_replace(col('datetime'), r'\[|\]|', ''))
+    df = df.withColumn('request', regexp_replace('request', '%|,|-|\?=', ''))
+    df = df.withColumn('referrer', regexp_replace('referrer', '%|,|-|\?=', ''))
+    df.coalesce(1).write.mode("overwrite").format('csv').option("header", True).save(raw_path)
     spark.sql("create database IF NOT EXISTS {}".format(hive_db))
-    df.write.mode("overwrite").saveAsTable("{}.{}".format(hive_db, hive_table))
+    df.coalesce(1).write.mode("overwrite").saveAsTable("{}.{}".format(hive_db, hive_table))
     return df
 
 

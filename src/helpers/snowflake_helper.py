@@ -24,5 +24,5 @@ class SnowflakeHelper:
             "sfRole": env.sfRole
         }
 
-        df.write.format("snowflake").options(**sfOptions).option("dbtable", "{}".format(table)).mode(
+        df.coalesce(1).write.format("snowflake").options(**sfOptions).option("dbtable", "{}".format(table)).mode(
             "overwrite").options(header=True).save()
