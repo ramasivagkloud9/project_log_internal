@@ -1,55 +1,80 @@
-import sys
-from pathlib import Path
-sys.path.append(str(Path.cwd().parent))
-sys.path.append(str(Path.cwd().parent.parent))
-import os
+import pyspark
 import findspark
-findspark.init()
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import *
 from pyspark.sql.types import *
 import pyspark.sql.functions as F
 from pyspark.sql.functions import regexp_replace
-from helpers.snowflake_helper import SnowflakeHelper
-
-import env
+from pyspark.sql.window import Window
 
 
-def create_cleansed_layer(raw_path, cleansed_path, hive_db, hive_table):
-    """
-    The create_cleansed_layer function reads the raw data from a CSV file, and creates a cleansed layer of the data.
-    The cleansed layer is then written to an output directory as a set of Parquet files. The function also writes
-    the cleansed layer to Hive as an external table.
+def retail_cleansed_layer():
+    spark = SparkSession.builder.enableHiveSupport() \
+        .config('spark.jars.packages',
+                'net.snowflake:snowflake-jdbc:3.13.23,net.snowflake:spark-snowflake_2.12:2.11.0-spark_3.3').getOrCreate()
 
-    :return: A cleansed dataframe and a hive table
-    """
-    spark = SparkSession.builder.enableHiveSupport().config('spark.jars.packages',
-                                                            'net.snowflake:snowflake-jdbc:3.13.23,net.snowflake:spark-snowflake_2.12:2.11.0-spark_3.3').getOrCreate()
-    df = spark.read.option("delimiter", ",").option("header", True).csv(raw_path).coalesce(1)
-    df = df.drop(col("row_id")).dropDuplicates().withColumn("row_id", monotonically_increasing_id())
-    df = df.select('row_id', 'client_ip', 'datetime', 'method', 'request', 'status_code', 'size', 'referrer', 'user_agent')
-    df = df.withColumn("datetime", to_timestamp(col("datetime"), "dd/MMM/yyyy:HH:mm:ss")).withColumn('datetime',
-                                                                                                date_format(
-                                                                                                    col("datetime"),
-                                                                                                    "MM/dd/yyyy HH:mm:ss"))
-    df = df.withColumn("referer_present(YorN)",
-                       when(col("referrer") == "NA", "N") \
-                       .otherwise("Y"))
-    df = df.drop("referrer")
-    df.na.fill("Nan").show(truncate=False)
+    """# #data reading from Log_Details(raw_layer)"""
 
-    def convert_to_kb(val):
-        return str(int(val) / (10 ** 3)) + " KB"
-    convert_to_kb_udf = F.udf(lambda x: convert_to_kb(x), StringType())
-    df = df.withColumn("size", convert_to_kb_udf(col("size")))
-    # df = df.withColumn('method', regexp_replace('method', 'GET', 'POST'))
-    df.coalesce(1).write.mode("overwrite").format('csv').option("header", True).save(cleansed_path)
-    df.coalesce(1).write.mode("overwrite").saveAsTable("{}.{}".format(hive_db, hive_table))
-    return df
+    # Read CSV File and Write to Table
+    cleansed_df = spark.read.option("header", True).csv(
+        "D:\\retail_sales_project\\src\\modules\\internal_files\\raw_retail_file.csv")
 
-if __name__ == "__main__":
-    df = create_cleansed_layer(r"{}/{}".format(os.getcwd(), env.raw_layer_df_path),
-                          r"{}/{}".format(os.getcwd(), env.cleansed_layer_df_path),
-                          env.hive_db,
-                          env.hive_cleansed_table)
-    SnowflakeHelper().save_df_to_snowflake(df, env.sf_cleansed_table)
+    cleansed_data = cleansed_df.withColumn("Orderdate", F.to_date("Orderdate", "M/d/yyyy")) \
+        .withColumn("Duedate", F.to_date("Duedate", "M/d/yyyy")) \
+        .withColumn("Shipdate", F.to_date("Shipdate", "M/d/yyyy"))
+
+    cleansed_data1 = cleansed_data.select(F.col("OrderNumber"),
+                                          F.col("ProductName"),
+                                          F.col("Color"),
+                                          F.col("Category"),
+                                          F.col("Subcategory"),
+                                          F.col("ListPrice"),
+                                          F.col("Orderdate"),
+                                          F.col("Duedate"),
+                                          F.col("Shipdate"),
+                                          F.col("PromotionName"),
+                                          F.col("SalesRegion"),
+                                          F.col("OrderQuantity"),
+                                          F.col("UnitPrice"),
+                                          F.col("SalesAmount"),
+                                          F.col("DiscountAmount"),
+                                          F.col("TaxAmount"),
+                                          F.col("Freight"))
+
+    cleansed_retail = cleansed_data1.withColumn('OrderQuantity', F.regexp_replace('OrderQuantity', 'Nan', '1')) \
+        .withColumn('OrderQuantity', F.col('OrderQuantity').cast('int')) \
+        .withColumn("ListPrice", F.round("ListPrice", 2)) \
+        .withColumn("UnitPrice", F.round("UnitPrice", 2)) \
+        .withColumn("SalesAmount", F.round("SalesAmount", 2)) \
+        .withColumn("DiscountAmount", F.round("DiscountAmount", 2)) \
+        .withColumn("TaxAmount", F.round("TaxAmount", 2)) \
+        .withColumn("Freight", F.round("Freight", 2)).na.fill("NA")
+
+    cleansed_retail.show()
+
+    cleansed_retail.coalesce(1).write.mode("overwrite").format('csv').option("header", True).save("D:\\retail_sales_project\\src\\modules\\internal_files\\cleansed_retail_file.csv")
+
+    # CLEANSED DATA IN HIVE TABLE
+    cleansed_retail.coalesce(1).write.mode("overwrite").saveAsTable("cleansed_retail_details")
+    df_retail = spark.sql("select * from cleansed_retail_details")
+    df_retail.show()
+
+    df_retail = spark.sql("select count(*) from cleansed_retail_details")
+    df_retail.show()
+
+    # sfOptions = {
+    #     "sfURL": r"https://hisswyy-qi52071.snowflakecomputing.com/",
+    #     "sfAccount": "su57550",
+    #     "sfUser": "ramasiva",
+    #     "sfPassword": "Rama@2022",
+    #     "sfDatabase": "RAMA_DB",
+    #     "sfSchema": "PUBLIC",
+    #     "sfWarehouse": "COMPUTE_WH",
+    #     "sfRole": "ACCOUNTADMIN"
+    # }
+    # cleansed_data.coalesce(1).write.format("snowflake").options(**sfOptions) \
+    #     .option("dbtable", "{}".format(r"cleansed_retail_details")).mode("overwrite").options(header=True).save()
+
+
+if __name__ == '__main__':
+    retail_cleansed_layer()
