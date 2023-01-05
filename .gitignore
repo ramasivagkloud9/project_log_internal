@@ -3,3 +3,4 @@ env.py
 src/modules/spark-warehouse
 src/modules/internal-files
 src/modules/metastore_db
+src/modules/increased_file
