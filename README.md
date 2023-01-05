@@ -3,3 +3,7 @@
 task1:
 
 creating an increasing file from the sample text
+
+task2:
+
+drop duplicates
